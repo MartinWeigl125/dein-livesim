@@ -30,38 +30,78 @@ valve_pos = 50
 boost_remaining = 0
 battery_low_remaining = 0
 
+WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
 print("Starte Live-Simulation...")
 
 while True:
     current_time = datetime.now(tz_berlin)
 
-    # BOOST
-    if boost_remaining > 0:
-        boost_state = True
-        control_mode = "BOOST"
-        boost_remaining -= 1
-    else:
-        if random.random() < 0.01:
-            boost_remaining = random.randint(5, 20)
-            boost_state = True
-            control_mode = "BOOST"
-        else:
-            boost_state = False
-            control_mode = random.choices(
-                ["AUTO", "MANU", "PARTY"],
-                weights=[0.75, 0.15, 0.10]
-            )[0]
-
     # SET Temp
-    # aus der Datenbank die aktuelle eingestellte Temperatur holen
-    response = supabase.table("devices").select("current_set_temp").eq("device_id", device_id).execute()
+    # aus der Datenbank die aktuelle eingestellte Temperatur und den aktuellen Modus holen
+    response = supabase.table("devices").select("current_set_temp, current_mode").eq("device_id", device_id).execute()
 
     # Wert extrahieren
     if response.data and len(response.data) > 0:
         set_temp = response.data[0]["current_set_temp"]
+        current_mode = response.data[0]["current_mode"]
     else:
         set_temp = 22.0
-        print("[!] Fehler beim Lesen der eingestellten Temperatur, default Wert wird verwendet.")
+        current_mode = "MANU"
+        print("[!] Fehler beim Lesen der eingestellten Temperatur und Modus, default Wert wird verwendet.")
+
+    # aus der Datenbank den nächsten Zeitpunkt für den PARTY Modus holen
+    response = supabase.rpc("get_current_or_next_party", {
+        "input_device_id": device_id,
+        "input_now": current_time.isoformat()
+    }).execute()
+
+    next_party = response.data if response.data else None
+
+    if next_party and "from_ts" in next_party and "to_ts" in next_party:
+        from_ts = datetime.fromisoformat(next_party["from_ts"])
+        to_ts = datetime.fromisoformat(next_party["to_ts"])
+        if from_ts <= current_time <= to_ts:
+            current_mode = "PARTY"
+
+    if current_mode == "AUTO":
+        today = WEEKDAYS[current_time.weekday()]
+        current_strftime = current_time.time().strftime("%H:%M:%S")
+
+        # Hole alle Weekplan-Einträge für das Gerät
+        response = (
+            supabase.table("device_weekplans")
+            .select("weekday, time, temperature")
+            .eq("device_id", device_id)
+            .order("weekday")
+            .order("time")
+            .execute()
+        )
+
+        if not response.data:
+            set_temp = 21 # default value
+
+        # Sortiere alle Einträge in sinnvoller Wochenreihenfolge
+        def weekday_index(entry):
+            return WEEKDAYS.index(entry["weekday"])
+
+        all_entries = sorted(response.data, key=lambda r: (weekday_index(r), r["time"]))
+
+        # Finde den letzten Eintrag <= jetzt (in Woche rotierend rückwärts)
+        now_index = WEEKDAYS.index(today)
+        candidates = []
+
+        for entry in all_entries:
+            entry_index = WEEKDAYS.index(entry["weekday"])
+            if entry_index < now_index or (entry_index == now_index and entry["time"] <= current_strftime):
+                candidates.append((entry_index, entry["time"], entry["temperature"]))
+
+        if candidates:
+            # Letzter gültiger Eintrag vor jetzigem Zeitpunkt
+            set_temp = candidates[-1][2]
+        else:
+            # Kein gültiger Eintrag diese Woche bis jetzt – nimm den letzten in der Liste
+            set_temp = all_entries[-1]["temperature"]
 
     # BATTERY
     if battery_low_remaining > 0:
@@ -82,8 +122,8 @@ while True:
     actual_temp = round(actual_temp, 1)
 
     # Ventilposition
-    target_valve = int(50 + temp_diff * 15 + random.uniform(-5, 5))
-    if boost_state:
+    target_valve = round(min(max(50 + temp_diff * 15 + random.uniform(-3, 3), 0), 100))
+    if current_mode == "BOOST":
         valve_pos = 100
     else:
         valve_pos += int((target_valve - valve_pos) * 0.2)
@@ -96,9 +136,9 @@ while True:
         "actual_temperature": round(actual_temp, 1),
         "set_temperature": round(set_temp, 1),
         "valve_position": valve_pos,
-        "boost_state": boost_state,
+        "boost_state": current_mode == "BOOST",
         "battery_low": battery_low,
-        "control_mode": control_mode
+        "control_mode": current_mode
     }
 
     # In Supabase einfügen
