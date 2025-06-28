@@ -3,9 +3,11 @@ import random
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
 
 from supabase import create_client, Client
 
+load_dotenv()
 # Supabase-Zugangsdaten
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -57,8 +59,19 @@ while True:
     }).execute()
 
     next_party = response.data if response.data else None
+    if isinstance(next_party, list):
+        if next_party:
+            next_party = next_party[0]
+        else:
+            next_party = None
 
-    if isinstance(next_party, dict) and "from_ts" in next_party and "to_ts" in next_party:
+    if (
+        isinstance(next_party, dict)
+        and isinstance(next_party.get("from_ts"), str)
+        and isinstance(next_party.get("to_ts"), str)
+        and next_party["from_ts"] is not None
+        and next_party["to_ts"] is not None
+    ):
         from_ts = datetime.fromisoformat(next_party["from_ts"])
         to_ts = datetime.fromisoformat(next_party["to_ts"])
         if from_ts <= current_time <= to_ts:
