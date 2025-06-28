@@ -58,11 +58,13 @@ while True:
 
     next_party = response.data if response.data else None
 
-    if next_party and "from_ts" in next_party and "to_ts" in next_party:
+    if isinstance(next_party, dict) and "from_ts" in next_party and "to_ts" in next_party:
         from_ts = datetime.fromisoformat(next_party["from_ts"])
         to_ts = datetime.fromisoformat(next_party["to_ts"])
         if from_ts <= current_time <= to_ts:
             current_mode = "PARTY"
+    else:
+        pass
 
     if current_mode == "AUTO":
         today = WEEKDAYS[current_time.weekday()]
