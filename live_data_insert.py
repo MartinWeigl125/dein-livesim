@@ -3,11 +3,11 @@ import random
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from dotenv import load_dotenv
+# from dotenv import load_dotenv # wird lokal benötigt
 
 from supabase import create_client, Client
 
-load_dotenv()
+# load_dotenv() # wird lokal benötigt
 # Supabase-Zugangsdaten
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -83,7 +83,7 @@ while True:
         today = WEEKDAYS[current_time.weekday()]
         current_strftime = current_time.time().strftime("%H:%M:%S")
 
-        # Hole alle Weekplan-Einträge für das Gerät
+        # alle Wochenplan Einträge für das Gerät aus der DB holen
         response = (
             supabase.table("device_weekplans")
             .select("weekday, time, temperature")
@@ -94,15 +94,15 @@ while True:
         )
 
         if not response.data:
-            set_temp = 21 # default value
+            set_temp = 21 # default Wert
 
-        # Sortiere alle Einträge in sinnvoller Wochenreihenfolge
+        # Einträge sortieren
         def weekday_index(entry):
             return WEEKDAYS.index(entry["weekday"])
 
         all_entries = sorted(response.data, key=lambda r: (weekday_index(r), r["time"]))
 
-        # Finde den letzten Eintrag <= jetzt (in Woche rotierend rückwärts)
+        # letzten Eintrag finden -> aktuelle Temperatur bestimmen
         now_index = WEEKDAYS.index(today)
         candidates = []
 
@@ -115,7 +115,7 @@ while True:
             # Letzter gültiger Eintrag vor jetzigem Zeitpunkt
             set_temp = candidates[-1][2]
         else:
-            # Kein gültiger Eintrag diese Woche bis jetzt – nimm den letzten in der Liste
+            # Kein gültiger Eintrag diese Woche bis jetzt -> Verwenden des letzten Eintrags aus der Liste
             set_temp = all_entries[-1]["temperature"]
 
     # BATTERY
